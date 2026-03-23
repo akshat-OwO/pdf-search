@@ -14,7 +14,7 @@ export function formatSearchResults(
   const fileName = basename(result.filePath);
 
   lines.push(`PDF: ${fileName}`);
-  lines.push(`Query: "${result.query}"`);
+  lines.push(`Query: ${formatQueryDisplay(result)}`);
   lines.push(`Pages scanned: ${result.pageCount}`);
   lines.push(`Matches found: ${result.matchCount}`);
 
@@ -31,7 +31,8 @@ export function formatSearchResults(
       lines.push(`Page ${page.page}`);
 
       page.matches.forEach((match, index) => {
-        lines.push(`  ${index + 1}. ${match.snippet}`);
+        const prefix = hasMultipleTerms(result) ? `[${match.term}] ` : "";
+        lines.push(`  ${index + 1}. ${prefix}${match.snippet}`);
       });
 
       lines.push("");
@@ -47,4 +48,16 @@ export function formatSearchResults(
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function formatQueryDisplay(result: SearchPdfResult): string {
+  if (result.queryTerms.or.length === 0 && result.queryTerms.and.length === 1) {
+    return `"${result.queryTerms.and[0]}"`;
+  }
+
+  return result.query;
+}
+
+function hasMultipleTerms(result: SearchPdfResult): boolean {
+  return result.queryTerms.and.length + result.queryTerms.or.length > 1;
 }

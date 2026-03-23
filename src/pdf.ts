@@ -35,6 +35,7 @@ export async function loadPdfDocument(
     data,
     disableWorker: true,
     useSystemFonts: true,
+    verbosity: 0,
   } as Parameters<typeof getDocument>[0]);
 
   try {

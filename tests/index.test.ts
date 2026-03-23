@@ -48,6 +48,70 @@ test("formatSearchResults includes surrounding text in context mode", async () =
   }
 });
 
+test("searchPdf supports AND-only page filters", async () => {
+  const fixture = await createPdfFixture([
+    "Alpha and beta appear together here.",
+    "Only alpha appears on this page.",
+    "Only beta appears on this page.",
+  ]);
+
+  try {
+    const result = await searchPdf(fixture.pdfPath, {
+      and: ["alpha", "beta"],
+      or: [],
+    });
+
+    expect(result.results.map((page) => page.page)).toEqual([1]);
+    expect(result.matchCount).toBe(2);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("searchPdf supports OR-only page filters", async () => {
+  const fixture = await createPdfFixture([
+    "Alpha appears here.",
+    "Gamma appears here.",
+    "Nothing relevant is on this page.",
+  ]);
+
+  try {
+    const result = await searchPdf(fixture.pdfPath, {
+      and: [],
+      or: ["alpha", "gamma"],
+    });
+
+    expect(result.results.map((page) => page.page)).toEqual([1, 2]);
+    expect(result.matchCount).toBe(2);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("searchPdf supports mixed AND and OR page filters", async () => {
+  const fixture = await createPdfFixture([
+    "Alpha, beta, and gamma all appear together.",
+    "Alpha and beta appear, but gamma is missing.",
+    "Alpha and gamma appear, but beta is missing.",
+  ]);
+
+  try {
+    const result = await searchPdf(fixture.pdfPath, {
+      and: ["alpha"],
+      or: ["beta", "gamma"],
+    });
+
+    expect(result.results.map((page) => page.page)).toEqual([1, 2, 3]);
+    expect(result.results[0].matches.map((match) => match.term)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+    ]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("formatSearchResults reports no matches clearly", async () => {
   const fixture = await createPdfFixture([
     "There is nothing relevant on this page.",
@@ -100,10 +164,59 @@ test("runCli prints contextual results when the flag is enabled", async () => {
     expect(exitCode).toBe(0);
     expect(captured.stdout).toContain("Page 1");
     expect(captured.stdout).toContain("needle");
-    expect(captured.stderr).toBe("");
+    expect(captured.stderr).toContain("Loading PDF...");
+    expect(captured.stderr).toContain("Scanning pages:");
+    expect(captured.stderr).not.toContain("Warning:");
   } finally {
     await fixture.cleanup();
   }
+});
+
+test("runCli supports repeatable --and and --or flags", async () => {
+  const fixture = await createPdfFixture([
+    "Alpha and beta appear together.",
+    "Alpha appears on its own.",
+    "Gamma appears on its own.",
+  ]);
+
+  try {
+    const captured = createCapturedIo();
+    const exitCode = await runCli(
+      [fixture.pdfPath, "--and", "alpha", "--or", "beta", "--or", "gamma"],
+      captured.io,
+    );
+
+    expect(exitCode).toBe(0);
+    expect(captured.stdout).toContain(
+      'Query: all of "alpha"; any of "beta", "gamma"',
+    );
+    expect(captured.stdout).toContain("Page 1");
+    expect(captured.stdout).not.toContain("Page 2");
+    expect(captured.stdout).not.toContain("Page 3");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("runCli rejects missing search terms", async () => {
+  const captured = createCapturedIo();
+  const exitCode = await runCli(["/tmp/example.pdf"], captured.io);
+
+  expect(exitCode).toBe(1);
+  expect(captured.stderr).toContain(
+    "Provide either <pdfPath> <query> or at least one --and/--or term.",
+  );
+});
+
+test("runCli rejects flags without values", async () => {
+  const captured = createCapturedIo();
+  const exitCode = await runCli(
+    ["/tmp/example.pdf", "--and", "--context"],
+    captured.io,
+  );
+
+  expect(exitCode).toBe(1);
+  expect(captured.stderr).toContain("Missing value for --and.");
 });
 
 async function createPdfFixture(pageTexts: string[]): Promise<{

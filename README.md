@@ -13,14 +13,21 @@ vp install
 
 ```bash
 pdf-search <pdfPath> <query> [options]
+pdf-search <pdfPath> --and <term> [--and <term> ...] [--or <term> ...] [options]
 ```
 
 ### Options
 
+- `--and <term>`: require a page to contain this term; repeat for all required terms
+- `--or <term>`: require a page to contain at least one optional term; repeat as needed
 - `-c, --context`: show a short snippet around each match
 - `--context-chars <number>`: control how much surrounding text is shown
 - `--concurrency <number>`: control how many pages are processed at once
 - `-h, --help`: print usage help
+
+Search terms are matched as case-insensitive substrings. Normal runs suppress
+recoverable PDF parser warnings, and progress is shown on stderr while the file
+is being scanned.
 
 ## Examples
 
@@ -28,6 +35,18 @@ Search a PDF and print page-level match counts:
 
 ```bash
 pdf-search "./docs/guide.pdf" "worker threads"
+```
+
+Require pages to contain both terms:
+
+```bash
+pdf-search "./docs/guide.pdf" --and "worker threads" --and "memory pressure"
+```
+
+Require pages to contain `worker threads` and at least one of two related terms:
+
+```bash
+pdf-search "./docs/guide.pdf" --and "worker threads" --or "benchmarking" --or "throughput"
 ```
 
 Search a PDF and show surrounding text for each hit:
@@ -54,6 +73,18 @@ Matches found: 3
 
 Page 4: 1 match
 Page 18: 2 matches
+```
+
+Multi-term mode:
+
+```text
+PDF: guide.pdf
+Query: all of "worker threads"; any of "benchmarking", "throughput"
+Pages scanned: 42
+Matches found: 4
+
+Page 18: 2 matches
+Page 27: 2 matches
 ```
 
 Context mode:

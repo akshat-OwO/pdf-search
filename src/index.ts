@@ -11,6 +11,8 @@ export { formatSearchResults } from "./format.js";
 export type {
   PageSearchResult,
   SearchMatch,
+  SearchProgress,
+  SearchQuery,
   SearchPdfOptions,
   SearchPdfResult,
 } from "./search.js";
