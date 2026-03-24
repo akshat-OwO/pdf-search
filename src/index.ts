@@ -10,6 +10,17 @@ import { runCli } from "./cli.js";
 export { runCli } from "./cli.js";
 export { formatSearchResults } from "./format.js";
 export type {
+  ExtractPageTextOptions,
+  GetPdfPageTextOptions,
+  LoadPdfOptions,
+  PageTextFormat,
+  PdfDocumentProxy,
+  PdfPageProxy,
+  PdfTextContent,
+  PdfTextItem,
+} from "./pdf.js";
+export { extractPageText, getPdfPageText, loadPdfDocument } from "./pdf.js";
+export type {
   PageSearchResult,
   SearchMatch,
   SearchProgress,
@@ -21,7 +32,8 @@ export { searchPdf } from "./search.js";
 
 const executedPath = process.argv[1];
 const currentFilePath = fileURLToPath(import.meta.url);
-const isDirectExecution = executedPath !== undefined && resolve(executedPath) === currentFilePath;
+const isDirectExecution =
+  executedPath !== undefined && resolve(executedPath) === currentFilePath;
 
 if (isDirectExecution && isMainThread) {
   void runCli(process.argv.slice(2)).then((exitCode) => {

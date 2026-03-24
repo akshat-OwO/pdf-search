@@ -1,6 +1,7 @@
 import process from "node:process";
 
 import { formatSearchResults } from "./format.js";
+import { getPdfPageText, type PageTextFormat } from "./pdf.js";
 import { searchPdf } from "./search.js";
 import type { SearchProgress, SearchQuery } from "./search.js";
 
@@ -11,13 +12,23 @@ export interface CliIo {
   stderr: Pick<typeof process.stderr, "write">;
 }
 
-interface ParsedCliArgs {
-  pdfPath: string;
-  query: string | SearchQuery;
-  showContext: boolean;
-  contextChars: number;
-  concurrency: number | undefined;
-}
+type PageCliOutputFormat = PageTextFormat | "json";
+
+type ParsedCliArgs =
+  | {
+      mode: "search";
+      pdfPath: string;
+      query: string | SearchQuery;
+      showContext: boolean;
+      contextChars: number;
+      concurrency: number | undefined;
+    }
+  | {
+      mode: "page";
+      pdfPath: string;
+      pageNumber: number;
+      pageOutputFormat: PageCliOutputFormat;
+    };
 
 class CliUsageError extends Error {}
 
@@ -34,6 +45,23 @@ export async function runCli(
     }
 
     const args = parseCliArgs(argv);
+
+    if (args.mode === "page") {
+      progress.clear();
+      if (args.pageOutputFormat === "json") {
+        const text = await getPdfPageText(args.pdfPath, args.pageNumber, {
+          format: "layout",
+        });
+        io.stdout.write(`${JSON.stringify({ page: args.pageNumber, text })}\n`);
+      } else {
+        const text = await getPdfPageText(args.pdfPath, args.pageNumber, {
+          format: args.pageOutputFormat,
+        });
+        io.stdout.write(`${text}\n`);
+      }
+      return 0;
+    }
+
     const result = await searchPdf(args.pdfPath, args.query, {
       concurrency: args.concurrency,
       contextChars: args.contextChars,
@@ -69,11 +97,22 @@ function parseCliArgs(argv: string[]): ParsedCliArgs {
   let showContext = false;
   let contextChars = DEFAULT_CONTEXT_CHARS;
   let concurrency: number | undefined;
+  let pageNumber: number | undefined;
+  let pageOutputFormat: PageCliOutputFormat | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
 
     switch (argument) {
+      case "--page":
+      case "-p":
+        pageNumber = parsePositiveInteger(argv[index + 1], argument);
+        index += 1;
+        break;
+      case "--page-format":
+        pageOutputFormat = parsePageOutputFormat(argv[index + 1], argument);
+        index += 1;
+        break;
       case "--context":
       case "-c":
         showContext = true;
@@ -107,6 +146,37 @@ function parseCliArgs(argv: string[]): ParsedCliArgs {
     throw new CliUsageError("Expected a PDF path.");
   }
 
+  if (pageOutputFormat !== undefined && pageNumber === undefined) {
+    throw new CliUsageError("--page-format is only valid with --page.");
+  }
+
+  if (pageNumber !== undefined) {
+    if (positionals.length !== 1) {
+      throw new CliUsageError("With --page, provide only <pdfPath>.");
+    }
+
+    if (and.length > 0 || or.length > 0) {
+      throw new CliUsageError("Cannot combine --page with --and/--or.");
+    }
+
+    if (showContext || contextChars !== DEFAULT_CONTEXT_CHARS) {
+      throw new CliUsageError(
+        "Cannot combine --page with --context/--context-chars.",
+      );
+    }
+
+    if (concurrency !== undefined) {
+      throw new CliUsageError("Cannot combine --page with --concurrency.");
+    }
+
+    return {
+      mode: "page",
+      pdfPath: positionals[0],
+      pageNumber,
+      pageOutputFormat: pageOutputFormat ?? "compact",
+    };
+  }
+
   const [pdfPath, legacyQuery] = positionals;
   const hasFlagQuery = and.length > 0 || or.length > 0;
 
@@ -123,6 +193,7 @@ function parseCliArgs(argv: string[]): ParsedCliArgs {
   }
 
   return {
+    mode: "search",
     pdfPath,
     query: hasFlagQuery
       ? {
@@ -158,6 +229,29 @@ function parsePositiveInteger(
   return parsed;
 }
 
+function parsePageOutputFormat(
+  value: string | undefined,
+  flagName: string,
+): PageCliOutputFormat {
+  if (value === undefined || value.startsWith("-")) {
+    throw new CliUsageError(`Missing value for ${flagName}.`);
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (
+    normalized === "compact" ||
+    normalized === "layout" ||
+    normalized === "json"
+  ) {
+    return normalized;
+  }
+
+  throw new CliUsageError(
+    `${flagName} must be compact, layout, or json (got ${value}).`,
+  );
+}
+
 function parseQueryTerm(value: string | undefined, flagName: string): string {
   if (value === undefined || value.startsWith("-")) {
     throw new CliUsageError(`Missing value for ${flagName}.`);
@@ -177,8 +271,11 @@ function getUsageText(): string {
     "Usage:",
     "  pdf-search <pdfPath> <query> [options]",
     "  pdf-search <pdfPath> --and <term> [--and <term> ...] [--or <term> ...] [options]",
+    "  pdf-search --page <number> <pdfPath>",
     "",
     "Options:",
+    "  -p, --page <number>          Print extracted text for a single page (1-based)",
+    "  --page-format <mode>       With --page: compact (default), layout, or json",
     "  --and <term>                 Require a page to contain this term",
     "  --or <term>                  Require a page to contain at least one OR term",
     "  -c, --context                Show surrounding text for each match",

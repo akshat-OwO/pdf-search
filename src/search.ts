@@ -1,10 +1,5 @@
 import { cpus } from "node:os";
-import {
-  Worker,
-  isMainThread,
-  parentPort,
-  workerData,
-} from "node:worker_threads";
+import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
 import type { SearchMatch, SearchQuery } from "./search-core.js";
 
 export interface PageSearchResult {
@@ -57,10 +52,7 @@ export async function searchPdf(
   const document = await loadPdfDocument(pdfPath, { disableWorker: true });
   const pageCount = document.numPages;
   await document.destroy();
-  const pageNumbers = Array.from(
-    { length: pageCount },
-    (_, index) => index + 1,
-  );
+  const pageNumbers = Array.from({ length: pageCount }, (_, index) => index + 1);
   const concurrency = resolveConcurrency(options.concurrency, pageCount);
   const contextChars = resolveContextChars(options.contextChars);
   let processedPages = 0;
@@ -88,10 +80,7 @@ export async function searchPdf(
   });
 
   const results = pages.filter((page) => page.matches.length > 0);
-  const matchCount = results.reduce(
-    (total, page) => total + page.matches.length,
-    0,
-  );
+  const matchCount = results.reduce((total, page) => total + page.matches.length, 0);
 
   return {
     filePath: pdfPath,
@@ -103,10 +92,7 @@ export async function searchPdf(
   };
 }
 
-function resolveConcurrency(
-  requested: number | undefined,
-  pageCount: number,
-): number {
+function resolveConcurrency(requested: number | undefined, pageCount: number): number {
   const defaultConcurrency = Math.max(1, Math.min(cpus().length, 4));
 
   if (requested === undefined) {
@@ -129,9 +115,7 @@ interface SearchPagesInput {
   onPageProcessed: () => void;
 }
 
-async function searchPages(
-  input: SearchPagesInput,
-): Promise<PageSearchResult[]> {
+async function searchPages(input: SearchPagesInput): Promise<PageSearchResult[]> {
   if (input.pageNumbers.length === 0) {
     return [];
   }
@@ -249,24 +233,18 @@ async function runSearchWorker(
   });
 }
 
-async function searchPagesInProcess(
-  input: SearchPagesInput,
-): Promise<PageSearchResult[]> {
+async function searchPagesInProcess(input: SearchPagesInput): Promise<PageSearchResult[]> {
   const document = await loadPdfDocument(input.pdfPath, {
     disableWorker: true,
   });
 
   try {
-    return await mapConcurrent(
-      input.pageNumbers,
-      input.concurrency,
-      async (page) => {
-        const text = await extractPageText(document, page);
-        const matches = findPageMatches(text, input.query, input.contextChars);
-        input.onPageProcessed();
-        return { page, matches };
-      },
-    );
+    return await mapConcurrent(input.pageNumbers, input.concurrency, async (page) => {
+      const text = await extractPageText(document, page);
+      const matches = findPageMatches(text, input.query, input.contextChars);
+      input.onPageProcessed();
+      return { page, matches };
+    });
   } finally {
     await document.destroy();
   }
@@ -283,9 +261,7 @@ function chunkItems<T>(items: T[], chunkCount: number): T[][] {
   return chunks.filter((chunk) => chunk.length > 0);
 }
 
-function isSearchWorkerExecutionData(
-  value: unknown,
-): value is SearchWorkerExecutionData {
+function isSearchWorkerExecutionData(value: unknown): value is SearchWorkerExecutionData {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -294,9 +270,7 @@ function isSearchWorkerExecutionData(
   return candidate.__pdfSearchWorker === true;
 }
 
-async function runSearchWorkerEntry(
-  input: SearchWorkerExecutionData,
-): Promise<void> {
+async function runSearchWorkerEntry(input: SearchWorkerExecutionData): Promise<void> {
   const pageResults = await searchPagesInProcess({
     pdfPath: input.pdfPath,
     pageNumbers: input.pages,
@@ -348,10 +322,7 @@ async function mapConcurrent<T, R>(
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    () => runWorker(),
-  );
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker());
 
   await Promise.all(workers);
 

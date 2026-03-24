@@ -1,7 +1,8 @@
 # pdf-search
 
 `pdf-search` is a Node CLI for searching text in a PDF and printing matches with
-their page numbers.
+their page numbers. You can also print the extracted text for a single page by
+number without scanning every page (PDF.js resolves the page directly).
 
 ## Install
 
@@ -14,10 +15,13 @@ vp install
 ```bash
 pdf-search <pdfPath> <query> [options]
 pdf-search <pdfPath> --and <term> [--and <term> ...] [--or <term> ...] [options]
+pdf-search --page <number> <pdfPath>
 ```
 
 ### Options
 
+- `-p, --page <number>`: print extracted text for one page (1-based); do not combine with search arguments or `--context` / `--context-chars` / `--concurrency`
+- `--page-format <mode>`: only with `--page`. **`compact`** (default): single-line style text like search extraction. **`layout`**: keep line breaks from the PDF text runs. **`json`**: one JSON object per line with `page` and `text` (the `text` field uses **layout** formatting)
 - `--and <term>`: require a page to contain this term; repeat for all required terms
 - `--or <term>`: require a page to contain at least one optional term; repeat as needed
 - `-c, --context`: show a short snippet around each match
@@ -59,6 +63,19 @@ Increase snippet length and worker-thread concurrency:
 
 ```bash
 pdf-search "./docs/guide.pdf" "worker threads" --context --context-chars 80 --concurrency 6
+```
+
+Dump normalized text for page 3 only (stdout is suitable for piping):
+
+```bash
+pdf-search --page 3 "./docs/guide.pdf"
+```
+
+Preserve line structure, or emit JSON for scripts:
+
+```bash
+pdf-search --page 3 --page-format layout "./docs/guide.pdf"
+pdf-search --page 3 --page-format json "./docs/guide.pdf"
 ```
 
 `--concurrency` defaults to a bounded worker-thread count based on CPU cores, and

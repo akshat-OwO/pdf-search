@@ -25,6 +25,16 @@ export interface LoadPdfOptions {
   disableWorker?: boolean;
 }
 
+export type PageTextFormat = "compact" | "layout";
+
+export interface ExtractPageTextOptions {
+  format?: PageTextFormat;
+}
+
+export interface GetPdfPageTextOptions extends LoadPdfOptions {
+  format?: PageTextFormat;
+}
+
 export async function loadPdfDocument(
   pdfPath: string,
   options: LoadPdfOptions = {},
@@ -49,7 +59,8 @@ export async function loadPdfDocument(
   } catch (error) {
     await loadingTask.destroy();
 
-    const message = error instanceof Error ? error.message : "Unknown PDF parsing error";
+    const message =
+      error instanceof Error ? error.message : "Unknown PDF parsing error";
     throw new Error(`Failed to read PDF file: ${message}`);
   }
 }
@@ -57,6 +68,7 @@ export async function loadPdfDocument(
 export async function extractPageText(
   document: PdfDocumentProxy,
   pageNumber: number,
+  options: ExtractPageTextOptions = {},
 ): Promise<string> {
   const page = await document.getPage(pageNumber);
   const textContent = await page.getTextContent();
@@ -65,7 +77,38 @@ export async function extractPageText(
     .map((item: PdfTextItem) => normalizeTextItem(item))
     .filter(Boolean);
 
-  return normalizePageText(segments);
+  const format = options.format ?? "compact";
+  return format === "layout"
+    ? layoutPageText(segments)
+    : normalizePageText(segments);
+}
+
+export async function getPdfPageText(
+  pdfPath: string,
+  pageNumber: number,
+  options: GetPdfPageTextOptions = {},
+): Promise<string> {
+  const { format, ...loadOptions } = options;
+  const document = await loadPdfDocument(pdfPath, {
+    disableWorker: true,
+    ...loadOptions,
+  });
+
+  try {
+    if (
+      !Number.isInteger(pageNumber) ||
+      pageNumber < 1 ||
+      pageNumber > document.numPages
+    ) {
+      throw new Error(
+        `Page number must be an integer from 1 to ${document.numPages} (got ${pageNumber}).`,
+      );
+    }
+
+    return await extractPageText(document, pageNumber, { format });
+  } finally {
+    await document.destroy();
+  }
 }
 
 function normalizeTextItem(item: PdfTextItem): string {
@@ -79,4 +122,12 @@ function normalizeTextItem(item: PdfTextItem): string {
 
 function normalizePageText(textParts: string[]): string {
   return textParts.join("").replace(/\s+/g, " ").trim();
+}
+
+function layoutPageText(textParts: string[]): string {
+  let text = textParts.join("");
+  text = text.replace(/[^\S\n]+/g, " ");
+  text = text.replace(/ *\n */g, "\n");
+  text = text.replace(/\n{3,}/g, "\n\n");
+  return text.trim();
 }
