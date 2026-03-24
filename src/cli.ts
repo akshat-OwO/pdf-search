@@ -78,12 +78,9 @@ export async function runCli(
     return 0;
   } catch (error) {
     progress.clear();
-    const message =
-      error instanceof Error ? error.message : "Unexpected CLI error";
+    const message = error instanceof Error ? error.message : "Unexpected CLI error";
     const output =
-      error instanceof CliUsageError
-        ? `${message}\n\n${getUsageText()}\n`
-        : `${message}\n`;
+      error instanceof CliUsageError ? `${message}\n\n${getUsageText()}\n` : `${message}\n`;
 
     io.stderr.write(output);
     return 1;
@@ -160,9 +157,7 @@ function parseCliArgs(argv: string[]): ParsedCliArgs {
     }
 
     if (showContext || contextChars !== DEFAULT_CONTEXT_CHARS) {
-      throw new CliUsageError(
-        "Cannot combine --page with --context/--context-chars.",
-      );
+      throw new CliUsageError("Cannot combine --page with --context/--context-chars.");
     }
 
     if (concurrency !== undefined) {
@@ -181,15 +176,11 @@ function parseCliArgs(argv: string[]): ParsedCliArgs {
   const hasFlagQuery = and.length > 0 || or.length > 0;
 
   if (hasFlagQuery && positionals.length !== 1) {
-    throw new CliUsageError(
-      "Use either <pdfPath> <query> or <pdfPath> with --and/--or flags.",
-    );
+    throw new CliUsageError("Use either <pdfPath> <query> or <pdfPath> with --and/--or flags.");
   }
 
   if (!hasFlagQuery && positionals.length !== 2) {
-    throw new CliUsageError(
-      "Provide either <pdfPath> <query> or at least one --and/--or term.",
-    );
+    throw new CliUsageError("Provide either <pdfPath> <query> or at least one --and/--or term.");
   }
 
   return {
@@ -220,36 +211,25 @@ function parsePositiveInteger(
   const minimum = allowZero ? 0 : 1;
 
   if (!Number.isInteger(parsed) || parsed < minimum) {
-    const constraint = allowZero
-      ? "a non-negative integer"
-      : "a positive integer";
+    const constraint = allowZero ? "a non-negative integer" : "a positive integer";
     throw new CliUsageError(`${flagName} must be ${constraint}.`);
   }
 
   return parsed;
 }
 
-function parsePageOutputFormat(
-  value: string | undefined,
-  flagName: string,
-): PageCliOutputFormat {
+function parsePageOutputFormat(value: string | undefined, flagName: string): PageCliOutputFormat {
   if (value === undefined || value.startsWith("-")) {
     throw new CliUsageError(`Missing value for ${flagName}.`);
   }
 
   const normalized = value.trim().toLowerCase();
 
-  if (
-    normalized === "compact" ||
-    normalized === "layout" ||
-    normalized === "json"
-  ) {
+  if (normalized === "compact" || normalized === "layout" || normalized === "json") {
     return normalized;
   }
 
-  throw new CliUsageError(
-    `${flagName} must be compact, layout, or json (got ${value}).`,
-  );
+  throw new CliUsageError(`${flagName} must be compact, layout, or json (got ${value}).`);
 }
 
 function parseQueryTerm(value: string | undefined, flagName: string): string {
@@ -295,10 +275,7 @@ function createProgressReporter(stderr: CliIo["stderr"]): {
   return {
     update(progress) {
       const message = formatProgressMessage(progress);
-      const padding =
-        lastWidth > message.length
-          ? " ".repeat(lastWidth - message.length)
-          : "";
+      const padding = lastWidth > message.length ? " ".repeat(lastWidth - message.length) : "";
 
       stderr.write(`\r${message}${padding}`);
       lastWidth = message.length;
@@ -325,9 +302,7 @@ function formatProgressMessage(progress: SearchProgress): string {
     return "Scanning pages...";
   }
 
-  const percentage = Math.floor(
-    (progress.processedPages / progress.totalPages) * 100,
-  );
+  const percentage = Math.floor((progress.processedPages / progress.totalPages) * 100);
 
   return `Scanning pages: ${progress.processedPages}/${progress.totalPages} (${percentage}%)`;
 }

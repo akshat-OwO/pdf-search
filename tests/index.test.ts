@@ -12,12 +12,7 @@ import { formatSearchResults } from "../src/index.ts";
 import { getPdfPageText } from "../src/index.ts";
 import { searchPdf } from "../src/index.ts";
 
-const bundledSearchEntry = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "dist",
-  "index.mjs",
-);
+const bundledSearchEntry = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "index.mjs");
 
 test("searchPdf returns page-numbered results in page order", async () => {
   const fixture = await createPdfFixture([
@@ -85,9 +80,7 @@ test("searchPdf returns stable results across worker counts", async () => {
 test.skipIf(!existsSync(bundledSearchEntry))(
   "bundled searchPdf matches serial under Node worker concurrency",
   async () => {
-    const { searchPdf: searchPdfBundled } = await import(
-      pathToFileURL(bundledSearchEntry).href
-    );
+    const { searchPdf: searchPdfBundled } = await import(pathToFileURL(bundledSearchEntry).href);
     const fixture = await createPdfFixture([
       "Alpha needle appears with beta.",
       "Gamma only page.",
@@ -210,9 +203,7 @@ test("searchPdf supports mixed AND and OR page filters", async () => {
 });
 
 test("formatSearchResults reports no matches clearly", async () => {
-  const fixture = await createPdfFixture([
-    "There is nothing relevant on this page.",
-  ]);
+  const fixture = await createPdfFixture(["There is nothing relevant on this page."]);
 
   try {
     const result = await searchPdf(fixture.pdfPath, "needle");
@@ -226,9 +217,9 @@ test("formatSearchResults reports no matches clearly", async () => {
 });
 
 test("searchPdf throws for unreadable paths", async () => {
-  await expect(
-    searchPdf("/definitely/missing/file.pdf", "needle"),
-  ).rejects.toThrow("PDF file is not readable");
+  await expect(searchPdf("/definitely/missing/file.pdf", "needle")).rejects.toThrow(
+    "PDF file is not readable",
+  );
 });
 
 test("getPdfPageText returns text for the requested page only", async () => {
@@ -289,18 +280,14 @@ test("searchPdf throws for invalid PDF content", async () => {
   try {
     await writeFile(filePath, "not actually a pdf", "utf8");
 
-    await expect(searchPdf(filePath, "needle")).rejects.toThrow(
-      "Failed to read PDF file",
-    );
+    await expect(searchPdf(filePath, "needle")).rejects.toThrow("Failed to read PDF file");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
 test("runCli prints contextual results when the flag is enabled", async () => {
-  const fixture = await createPdfFixture([
-    "Context around needle is useful for users.",
-  ]);
+  const fixture = await createPdfFixture(["Context around needle is useful for users."]);
 
   try {
     const captured = createCapturedIo();
@@ -335,9 +322,7 @@ test("runCli supports repeatable --and and --or flags", async () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(captured.stdout).toContain(
-      'Query: all of "alpha"; any of "beta", "gamma"',
-    );
+    expect(captured.stdout).toContain('Query: all of "alpha"; any of "beta", "gamma"');
     expect(captured.stdout).toContain("Page 1");
     expect(captured.stdout).not.toContain("Page 2");
     expect(captured.stdout).not.toContain("Page 3");
@@ -355,10 +340,7 @@ test("runCli prints single-page text with --page", async () => {
 
   try {
     const captured = createCapturedIo();
-    const exitCode = await runCli(
-      ["--page", "2", fixture.pdfPath],
-      captured.io,
-    );
+    const exitCode = await runCli(["--page", "2", fixture.pdfPath], captured.io);
 
     expect(exitCode).toBe(0);
     expect(captured.stdout).toContain("Middle page");
@@ -395,10 +377,7 @@ test("runCli --page-format json prints layout text in JSON", async () => {
 
 test("runCli rejects --page-format without --page", async () => {
   const captured = createCapturedIo();
-  const exitCode = await runCli(
-    ["/tmp/x.pdf", "--page-format", "layout"],
-    captured.io,
-  );
+  const exitCode = await runCli(["/tmp/x.pdf", "--page-format", "layout"], captured.io);
 
   expect(exitCode).toBe(1);
   expect(captured.stderr).toContain("--page-format is only valid with --page.");
@@ -406,10 +385,7 @@ test("runCli rejects --page-format without --page", async () => {
 
 test("runCli rejects --page-format with search mode", async () => {
   const captured = createCapturedIo();
-  const exitCode = await runCli(
-    ["/tmp/x.pdf", "needle", "--page-format", "json"],
-    captured.io,
-  );
+  const exitCode = await runCli(["/tmp/x.pdf", "needle", "--page-format", "json"], captured.io);
 
   expect(exitCode).toBe(1);
   expect(captured.stderr).toContain("--page-format is only valid with --page.");
@@ -417,10 +393,7 @@ test("runCli rejects --page-format with search mode", async () => {
 
 test("runCli rejects --page combined with search query", async () => {
   const captured = createCapturedIo();
-  const exitCode = await runCli(
-    ["/tmp/x.pdf", "query", "--page", "1"],
-    captured.io,
-  );
+  const exitCode = await runCli(["/tmp/x.pdf", "query", "--page", "1"], captured.io);
 
   expect(exitCode).toBe(1);
   expect(captured.stderr).toContain("With --page, provide only <pdfPath>.");
@@ -438,10 +411,7 @@ test("runCli rejects missing search terms", async () => {
 
 test("runCli rejects flags without values", async () => {
   const captured = createCapturedIo();
-  const exitCode = await runCli(
-    ["/tmp/example.pdf", "--and", "--context"],
-    captured.io,
-  );
+  const exitCode = await runCli(["/tmp/example.pdf", "--and", "--context"], captured.io);
 
   expect(exitCode).toBe(1);
   expect(captured.stderr).toContain("Missing value for --and.");
