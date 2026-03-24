@@ -59,8 +59,7 @@ export async function loadPdfDocument(
   } catch (error) {
     await loadingTask.destroy();
 
-    const message =
-      error instanceof Error ? error.message : "Unknown PDF parsing error";
+    const message = error instanceof Error ? error.message : "Unknown PDF parsing error";
     throw new Error(`Failed to read PDF file: ${message}`);
   }
 }
@@ -78,9 +77,7 @@ export async function extractPageText(
     .filter(Boolean);
 
   const format = options.format ?? "compact";
-  return format === "layout"
-    ? layoutPageText(segments)
-    : normalizePageText(segments);
+  return format === "layout" ? layoutPageText(segments) : normalizePageText(segments);
 }
 
 export async function getPdfPageText(
@@ -95,11 +92,7 @@ export async function getPdfPageText(
   });
 
   try {
-    if (
-      !Number.isInteger(pageNumber) ||
-      pageNumber < 1 ||
-      pageNumber > document.numPages
-    ) {
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > document.numPages) {
       throw new Error(
         `Page number must be an integer from 1 to ${document.numPages} (got ${pageNumber}).`,
       );

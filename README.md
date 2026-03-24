@@ -6,8 +6,17 @@ number without scanning every page (PDF.js resolves the page directly).
 
 ## Install
 
+From npm:
+
 ```bash
-vp install
+pnpm add -g @akshatowo/pdf-search
+# or: npm install -g @akshatowo/pdf-search
+```
+
+From a clone (contributors):
+
+```bash
+pnpm install
 ```
 
 ## Usage
@@ -122,6 +131,21 @@ Page 18
   1. ...a bounded worker threads strategy reduces memory pressure...
   2. ...benchmarking worker threads across pages improves throughput...
 ```
+
+## Releasing (maintainers)
+
+1. **npm access** — Use an account that owns the `@akshatowo` scope. Prefer [Trusted Publishing](https://docs.npmjs.com/trusted-publishers): connect GitHub repository `akshat-OwO/pdf-search` and the **Release** workflow for `@akshatowo/pdf-search`. Otherwise add an `NPM_TOKEN` repository secret and pass `NODE_AUTH_TOKEN` on the publish step (see comment in [`.github/workflows/release.yml`](.github/workflows/release.yml)).
+
+2. **Version** — `pnpm exec bumpp` updates `package.json` only ([`bump.config.ts`](bump.config.ts) disables commit, tag, and push). Commit the change, then tag and push, for example:
+
+   ```bash
+   git tag v0.1.0
+   git push origin main --tags
+   ```
+
+   Or run **Release** manually from the Actions tab (`workflow_dispatch`).
+
+3. **CI** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `pnpm exec vp check`, `pnpm exec vp test`, and `pnpm exec vp pack` on pushes and pull requests to `main`.
 
 ## Development
 
