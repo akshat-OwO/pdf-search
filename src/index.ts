@@ -3,6 +3,7 @@
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isMainThread } from "node:worker_threads";
 
 import { runCli } from "./cli.js";
 
@@ -20,10 +21,9 @@ export { searchPdf } from "./search.js";
 
 const executedPath = process.argv[1];
 const currentFilePath = fileURLToPath(import.meta.url);
-const isDirectExecution =
-  executedPath !== undefined && resolve(executedPath) === currentFilePath;
+const isDirectExecution = executedPath !== undefined && resolve(executedPath) === currentFilePath;
 
-if (isDirectExecution) {
+if (isDirectExecution && isMainThread) {
   void runCli(process.argv.slice(2)).then((exitCode) => {
     process.exitCode = exitCode;
   });

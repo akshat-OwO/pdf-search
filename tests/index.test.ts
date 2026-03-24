@@ -1,6 +1,8 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { expect, test } from "vite-plus/test";
@@ -8,6 +10,13 @@ import { expect, test } from "vite-plus/test";
 import { runCli } from "../src/index.ts";
 import { formatSearchResults } from "../src/index.ts";
 import { searchPdf } from "../src/index.ts";
+
+const bundledSearchEntry = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "dist",
+  "index.mjs",
+);
 
 test("searchPdf returns page-numbered results in page order", async () => {
   const fixture = await createPdfFixture([
@@ -30,6 +39,93 @@ test("searchPdf returns page-numbered results in page order", async () => {
     await fixture.cleanup();
   }
 });
+
+test("searchPdf returns stable results across worker counts", async () => {
+  const fixture = await createPdfFixture([
+    "Alpha needle appears with beta.",
+    "Gamma only page.",
+    "Needle appears again with alpha and gamma needle.",
+    "No match here.",
+  ]);
+
+  try {
+    const serial = await searchPdf(
+      fixture.pdfPath,
+      {
+        and: ["needle"],
+        or: ["alpha", "gamma"],
+      },
+      {
+        concurrency: 1,
+        contextChars: 12,
+      },
+    );
+    const parallel = await searchPdf(
+      fixture.pdfPath,
+      {
+        and: ["needle"],
+        or: ["alpha", "gamma"],
+      },
+      {
+        concurrency: 4,
+        contextChars: 12,
+      },
+    );
+
+    expect(parallel.pageCount).toBe(serial.pageCount);
+    expect(parallel.matchCount).toBe(serial.matchCount);
+    expect(parallel.results).toEqual(serial.results);
+    expect(parallel.results.map((page) => page.page)).toEqual([1, 3]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test.skipIf(!existsSync(bundledSearchEntry))(
+  "bundled searchPdf matches serial under Node worker concurrency",
+  async () => {
+    const { searchPdf: searchPdfBundled } = await import(
+      pathToFileURL(bundledSearchEntry).href
+    );
+    const fixture = await createPdfFixture([
+      "Alpha needle appears with beta.",
+      "Gamma only page.",
+      "Needle appears again with alpha and gamma needle.",
+      "No match here.",
+    ]);
+
+    try {
+      const serial = await searchPdfBundled(
+        fixture.pdfPath,
+        {
+          and: ["needle"],
+          or: ["alpha", "gamma"],
+        },
+        {
+          concurrency: 1,
+          contextChars: 12,
+        },
+      );
+      const parallel = await searchPdfBundled(
+        fixture.pdfPath,
+        {
+          and: ["needle"],
+          or: ["alpha", "gamma"],
+        },
+        {
+          concurrency: 4,
+          contextChars: 12,
+        },
+      );
+
+      expect(parallel.pageCount).toBe(serial.pageCount);
+      expect(parallel.matchCount).toBe(serial.matchCount);
+      expect(parallel.results).toEqual(serial.results);
+    } finally {
+      await fixture.cleanup();
+    }
+  },
+);
 
 test("formatSearchResults includes surrounding text in context mode", async () => {
   const fixture = await createPdfFixture(["Alpha beta needle gamma delta."]);

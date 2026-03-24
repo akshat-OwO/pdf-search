@@ -22,7 +22,7 @@ pdf-search <pdfPath> --and <term> [--and <term> ...] [--or <term> ...] [options]
 - `--or <term>`: require a page to contain at least one optional term; repeat as needed
 - `-c, --context`: show a short snippet around each match
 - `--context-chars <number>`: control how much surrounding text is shown
-- `--concurrency <number>`: control how many pages are processed at once
+- `--concurrency <number>`: control how many worker threads process pages in parallel
 - `-h, --help`: print usage help
 
 Search terms are matched as case-insensitive substrings. Normal runs suppress
@@ -55,11 +55,14 @@ Search a PDF and show surrounding text for each hit:
 pdf-search "./docs/guide.pdf" "worker threads" --context
 ```
 
-Increase snippet length and page-processing concurrency:
+Increase snippet length and worker-thread concurrency:
 
 ```bash
 pdf-search "./docs/guide.pdf" "worker threads" --context --context-chars 80 --concurrency 6
 ```
+
+`--concurrency` defaults to a bounded worker-thread count based on CPU cores, and
+is capped by the total page count to avoid oversubscription.
 
 ## Example Output
 
@@ -121,4 +124,10 @@ Run checks:
 
 ```bash
 vp check
+```
+
+Run a synthetic concurrency benchmark:
+
+```bash
+vp run bench
 ```

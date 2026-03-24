@@ -5,7 +5,6 @@ import { searchPdf } from "./search.js";
 import type { SearchProgress, SearchQuery } from "./search.js";
 
 const DEFAULT_CONTEXT_CHARS = 40;
-const DEFAULT_CONCURRENCY = 4;
 
 export interface CliIo {
   stdout: Pick<typeof process.stdout, "write">;
@@ -17,7 +16,7 @@ interface ParsedCliArgs {
   query: string | SearchQuery;
   showContext: boolean;
   contextChars: number;
-  concurrency: number;
+  concurrency: number | undefined;
 }
 
 class CliUsageError extends Error {}
@@ -69,7 +68,7 @@ function parseCliArgs(argv: string[]): ParsedCliArgs {
   const or: string[] = [];
   let showContext = false;
   let contextChars = DEFAULT_CONTEXT_CHARS;
-  let concurrency = DEFAULT_CONCURRENCY;
+  let concurrency: number | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -184,7 +183,7 @@ function getUsageText(): string {
     "  --or <term>                  Require a page to contain at least one OR term",
     "  -c, --context                Show surrounding text for each match",
     "  --context-chars <number>     Characters of surrounding text to include",
-    "  --concurrency <number>       Number of pages to process at once",
+    "  --concurrency <number>       Worker threads (default: min(CPU count, 4), capped by pages)",
     "  -h, --help                   Show this help message",
   ].join("\n");
 }

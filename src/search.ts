@@ -1,15 +1,11 @@
 import { cpus } from "node:os";
-
-import { extractPageText, loadPdfDocument } from "./pdf.js";
-
-const DEFAULT_CONTEXT_CHARS = 40;
-
-export interface SearchMatch {
-  term: string;
-  index: number;
-  text: string;
-  snippet: string;
-}
+import {
+  Worker,
+  isMainThread,
+  parentPort,
+  workerData,
+} from "node:worker_threads";
+import type { SearchMatch, SearchQuery } from "./search-core.js";
 
 export interface PageSearchResult {
   page: number;
@@ -25,10 +21,14 @@ export interface SearchPdfResult {
   results: PageSearchResult[];
 }
 
-export interface SearchQuery {
-  and: string[];
-  or: string[];
-}
+export type { SearchMatch, SearchQuery } from "./search-core.js";
+import {
+  findPageMatches,
+  formatQuerySummary,
+  normalizeQuery,
+  resolveContextChars,
+} from "./search-core.js";
+import { extractPageText, loadPdfDocument } from "./pdf.js";
 
 export interface SearchProgress {
   phase: "loading" | "scanning";
@@ -54,8 +54,9 @@ export async function searchPdf(
     totalPages: 0,
   });
 
-  const document = await loadPdfDocument(pdfPath);
+  const document = await loadPdfDocument(pdfPath, { disableWorker: true });
   const pageCount = document.numPages;
+  await document.destroy();
   const pageNumbers = Array.from(
     { length: pageCount },
     (_, index) => index + 1,
@@ -64,49 +65,42 @@ export async function searchPdf(
   const contextChars = resolveContextChars(options.contextChars);
   let processedPages = 0;
 
-  try {
-    options.onProgress?.({
-      phase: "scanning",
-      processedPages,
-      totalPages: pageCount,
-    });
-    const pages = await mapConcurrent(
-      pageNumbers,
-      concurrency,
-      async (page) => {
-        const text = await extractPageText(document, page);
-        const matches = findPageMatches(text, normalizedQuery, contextChars);
-        processedPages += 1;
-        options.onProgress?.({
-          phase: "scanning",
-          processedPages,
-          totalPages: pageCount,
-        });
+  options.onProgress?.({
+    phase: "scanning",
+    processedPages,
+    totalPages: pageCount,
+  });
 
-        return {
-          page,
-          matches,
-        };
-      },
-    );
+  const pages = await searchPages({
+    pdfPath,
+    pageNumbers,
+    query: normalizedQuery,
+    contextChars,
+    concurrency,
+    onPageProcessed: () => {
+      processedPages += 1;
+      options.onProgress?.({
+        phase: "scanning",
+        processedPages,
+        totalPages: pageCount,
+      });
+    },
+  });
 
-    const results = pages.filter((page) => page.matches.length > 0);
-    const matchCount = results.reduce(
-      (total, page) => total + page.matches.length,
-      0,
-    );
+  const results = pages.filter((page) => page.matches.length > 0);
+  const matchCount = results.reduce(
+    (total, page) => total + page.matches.length,
+    0,
+  );
 
-    return {
-      filePath: pdfPath,
-      query: formatQuerySummary(normalizedQuery),
-      queryTerms: normalizedQuery,
-      pageCount,
-      matchCount,
-      results,
-    };
-  } finally {
-    await document.destroy();
-  }
+  return {
+    filePath: pdfPath,
+    query: formatQuerySummary(normalizedQuery),
+    queryTerms: normalizedQuery,
+    pageCount,
+    matchCount,
+    results,
+  };
 }
 
 function resolveConcurrency(
@@ -126,151 +120,211 @@ function resolveConcurrency(
   return Math.min(requested, pageCount);
 }
 
-function resolveContextChars(requested: number | undefined): number {
-  if (requested === undefined) {
-    return DEFAULT_CONTEXT_CHARS;
-  }
-
-  if (!Number.isInteger(requested) || requested < 0) {
-    throw new Error("Context characters must be a non-negative integer.");
-  }
-
-  return requested;
+interface SearchPagesInput {
+  pdfPath: string;
+  pageNumbers: number[];
+  query: SearchQuery;
+  contextChars: number;
+  concurrency: number;
+  onPageProcessed: () => void;
 }
 
-function normalizeQuery(query: string | SearchQuery): SearchQuery {
-  if (typeof query === "string") {
-    const trimmedQuery = query.trim();
-
-    if (trimmedQuery.length === 0) {
-      throw new Error("Search query must not be empty.");
-    }
-
-    return {
-      and: [trimmedQuery],
-      or: [],
-    };
-  }
-
-  const and = normalizeTerms(query.and, "AND");
-  const or = normalizeTerms(query.or, "OR");
-
-  if (and.length === 0 && or.length === 0) {
-    throw new Error("At least one search term is required.");
-  }
-
-  return { and, or };
-}
-
-function normalizeTerms(terms: string[], groupName: string): string[] {
-  const normalized = terms.map((term) => term.trim());
-
-  if (normalized.some((term) => term.length === 0)) {
-    throw new Error(`${groupName} search terms must not be empty.`);
-  }
-
-  return Array.from(new Set(normalized));
-}
-
-function findPageMatches(
-  text: string,
-  query: SearchQuery,
-  contextChars: number,
-): SearchMatch[] {
-  const andMatches = query.and.map((term) =>
-    findMatches(text, term, contextChars),
-  );
-  const orMatches = query.or.map((term) =>
-    findMatches(text, term, contextChars),
-  );
-  const satisfiesAnd = andMatches.every((matches) => matches.length > 0);
-  const satisfiesOr =
-    orMatches.length === 0 || orMatches.some((matches) => matches.length > 0);
-
-  if (!satisfiesAnd || !satisfiesOr) {
+async function searchPages(
+  input: SearchPagesInput,
+): Promise<PageSearchResult[]> {
+  if (input.pageNumbers.length === 0) {
     return [];
   }
 
-  return dedupeMatches([...andMatches, ...orMatches].flat());
-}
-
-function dedupeMatches(matches: SearchMatch[]): SearchMatch[] {
-  const uniqueMatches = new Map<string, SearchMatch>();
-
-  for (const match of matches) {
-    uniqueMatches.set(`${match.term}:${match.index}`, match);
+  if (!canUseBundledWorkerThreads() || input.concurrency <= 1) {
+    return searchPagesInProcess(input);
   }
 
-  return Array.from(uniqueMatches.values()).sort((left, right) => {
-    if (left.index !== right.index) {
-      return left.index - right.index;
-    }
+  const chunks = chunkItems(input.pageNumbers, input.concurrency);
+  const workerResults = await Promise.all(
+    chunks.map((pages) =>
+      runSearchWorker(
+        {
+          pdfPath: input.pdfPath,
+          pages,
+          query: input.query,
+          contextChars: input.contextChars,
+        },
+        input.onPageProcessed,
+      ),
+    ),
+  );
 
-    return left.term.localeCompare(right.term);
+  return workerResults.flat().sort((left, right) => left.page - right.page);
+}
+
+interface SearchWorkerInput {
+  pdfPath: string;
+  pages: number[];
+  query: SearchQuery;
+  contextChars: number;
+}
+
+interface SearchWorkerExecutionData extends SearchWorkerInput {
+  __pdfSearchWorker: true;
+}
+
+interface SearchWorkerProgressMessage {
+  type: "progress";
+  processedPages: number;
+}
+
+interface SearchWorkerResultMessage {
+  type: "result";
+  pages: PageSearchResult[];
+}
+
+interface SearchWorkerErrorMessage {
+  type: "error";
+  message: string;
+}
+
+type SearchWorkerMessage =
+  | SearchWorkerProgressMessage
+  | SearchWorkerResultMessage
+  | SearchWorkerErrorMessage;
+
+function canUseBundledWorkerThreads(): boolean {
+  // Production: bundled `dist/index.mjs` is a real file path Node can load as a worker.
+  // Tests: set `PDF_SEARCH_FORCE_WORKERS=1` to exercise the worker path from TS sources.
+  if (process.env.PDF_SEARCH_FORCE_WORKERS === "1") {
+    return true;
+  }
+
+  return import.meta.url.endsWith(".mjs");
+}
+
+async function runSearchWorker(
+  workerInput: SearchWorkerInput,
+  onPageProcessed: () => void,
+): Promise<PageSearchResult[]> {
+  return new Promise<PageSearchResult[]>((resolve, reject) => {
+    const worker = new Worker(new URL(import.meta.url), {
+      workerData: {
+        __pdfSearchWorker: true,
+        ...workerInput,
+      } satisfies SearchWorkerExecutionData,
+    });
+    let settled = false;
+
+    const rejectOnce = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
+
+    worker.on("message", (message: SearchWorkerMessage) => {
+      if (message.type === "progress") {
+        for (let index = 0; index < message.processedPages; index += 1) {
+          onPageProcessed();
+        }
+        return;
+      }
+
+      if (message.type === "error") {
+        rejectOnce(new Error(message.message));
+        return;
+      }
+
+      settled = true;
+      resolve(message.pages);
+    });
+
+    worker.on("error", (error: unknown) => {
+      rejectOnce(error instanceof Error ? error : new Error(String(error)));
+    });
+
+    worker.on("exit", (code) => {
+      if (!settled && code !== 0) {
+        rejectOnce(new Error(`Search worker exited with code ${code}.`));
+      }
+    });
   });
 }
 
-function findMatches(
-  text: string,
-  query: string,
-  contextChars: number,
-): SearchMatch[] {
-  const queryLower = query.toLowerCase();
-  const textLower = text.toLowerCase();
-  const matches: SearchMatch[] = [];
+async function searchPagesInProcess(
+  input: SearchPagesInput,
+): Promise<PageSearchResult[]> {
+  const document = await loadPdfDocument(input.pdfPath, {
+    disableWorker: true,
+  });
 
-  let searchStart = 0;
-
-  while (searchStart < textLower.length) {
-    const index = textLower.indexOf(queryLower, searchStart);
-
-    if (index === -1) {
-      break;
-    }
-
-    const end = index + query.length;
-    matches.push({
-      term: query,
-      index,
-      text: text.slice(index, end),
-      snippet: buildSnippet(text, index, end, contextChars),
-    });
-    searchStart = end;
+  try {
+    return await mapConcurrent(
+      input.pageNumbers,
+      input.concurrency,
+      async (page) => {
+        const text = await extractPageText(document, page);
+        const matches = findPageMatches(text, input.query, input.contextChars);
+        input.onPageProcessed();
+        return { page, matches };
+      },
+    );
+  } finally {
+    await document.destroy();
   }
-
-  return matches;
 }
 
-function buildSnippet(
-  text: string,
-  start: number,
-  end: number,
-  contextChars: number,
-): string {
-  const snippetStart = Math.max(0, start - contextChars);
-  const snippetEnd = Math.min(text.length, end + contextChars);
-  const prefix = snippetStart > 0 ? "..." : "";
-  const suffix = snippetEnd < text.length ? "..." : "";
+function chunkItems<T>(items: T[], chunkCount: number): T[][] {
+  const normalizedChunkCount = Math.max(1, Math.min(chunkCount, items.length));
+  const chunks = Array.from({ length: normalizedChunkCount }, () => [] as T[]);
 
-  return `${prefix}${text.slice(snippetStart, snippetEnd).trim()}${suffix}`;
+  items.forEach((item, index) => {
+    chunks[index % normalizedChunkCount].push(item);
+  });
+
+  return chunks.filter((chunk) => chunk.length > 0);
 }
 
-function formatQuerySummary(query: SearchQuery): string {
-  const parts: string[] = [];
-
-  if (query.and.length > 0) {
-    parts.push(`all of ${formatTermList(query.and)}`);
+function isSearchWorkerExecutionData(
+  value: unknown,
+): value is SearchWorkerExecutionData {
+  if (typeof value !== "object" || value === null) {
+    return false;
   }
 
-  if (query.or.length > 0) {
-    parts.push(`any of ${formatTermList(query.or)}`);
-  }
-
-  return parts.join("; ");
+  const candidate = value as Record<string, unknown>;
+  return candidate.__pdfSearchWorker === true;
 }
 
-function formatTermList(terms: string[]): string {
-  return terms.map((term) => `"${term}"`).join(", ");
+async function runSearchWorkerEntry(
+  input: SearchWorkerExecutionData,
+): Promise<void> {
+  const pageResults = await searchPagesInProcess({
+    pdfPath: input.pdfPath,
+    pageNumbers: input.pages,
+    query: input.query,
+    contextChars: input.contextChars,
+    concurrency: 1,
+    onPageProcessed: () => {
+      parentPort?.postMessage({
+        type: "progress",
+        processedPages: 1,
+      } satisfies SearchWorkerProgressMessage);
+    },
+  });
+
+  parentPort?.postMessage({
+    type: "result",
+    pages: pageResults,
+  } satisfies SearchWorkerResultMessage);
+}
+
+if (!isMainThread && isSearchWorkerExecutionData(workerData)) {
+  void runSearchWorkerEntry(workerData).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    parentPort?.postMessage({
+      type: "error",
+      message,
+    } satisfies SearchWorkerErrorMessage);
+  });
 }
 
 async function mapConcurrent<T, R>(

@@ -21,8 +21,13 @@ export interface PdfDocumentProxy {
   numPages: number;
 }
 
+export interface LoadPdfOptions {
+  disableWorker?: boolean;
+}
+
 export async function loadPdfDocument(
   pdfPath: string,
+  options: LoadPdfOptions = {},
 ): Promise<PdfDocumentProxy> {
   try {
     await access(pdfPath, fsConstants.R_OK);
@@ -31,9 +36,10 @@ export async function loadPdfDocument(
   }
 
   const data = new Uint8Array(await readFile(pdfPath));
+  const disableWorker = options.disableWorker ?? true;
   const loadingTask = getDocument({
     data,
-    disableWorker: true,
+    disableWorker,
     useSystemFonts: true,
     verbosity: 0,
   } as Parameters<typeof getDocument>[0]);
@@ -43,8 +49,7 @@ export async function loadPdfDocument(
   } catch (error) {
     await loadingTask.destroy();
 
-    const message =
-      error instanceof Error ? error.message : "Unknown PDF parsing error";
+    const message = error instanceof Error ? error.message : "Unknown PDF parsing error";
     throw new Error(`Failed to read PDF file: ${message}`);
   }
 }
