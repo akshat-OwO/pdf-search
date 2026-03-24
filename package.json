@@ -1,21 +1,21 @@
 {
-  "name": "pdf-search",
-  "version": "0.0.0",
+  "name": "@akshatowo/pdf-search",
+  "version": "0.1.0",
   "description": "CLI for searching text in PDF files with page-numbered results.",
   "keywords": [
     "cli",
     "pdf",
     "search"
   ],
-  "homepage": "https://github.com/author/library#readme",
+  "homepage": "https://github.com/akshat-OwO/pdf-search",
   "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "https://github.com/akshat-OwO/pdf-search/issues"
   },
   "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
+  "author": "Akshat Singh <akshatsinghdelhi@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
+    "url": "git+https://github.com/akshat-OwO/pdf-search.git"
   },
   "bin": {
     "pdf-search": "./dist/index.mjs"
