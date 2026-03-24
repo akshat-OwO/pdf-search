@@ -1,22 +1,16 @@
-# Publishes to npm when you push a version tag (v*) or run this workflow manually.
+# First publish or any release when Trusted Publishing (OIDC) is not set up yet.
+# Add repository secret NPM_TOKEN (npm granular access token with publish for this package).
 #
-# Preferred after the package exists: npm Trusted Publishing (OIDC) — link this repo +
-# this workflow on the package at npm → Access (no NPM_TOKEN).
-#
-# First publish / OIDC 404: use workflow "Release (npm token)" instead
-# (.github/workflows/release-npm-token.yml) with repository secret NPM_TOKEN.
+# Run: Actions → "Release (npm token)" → Run workflow (pick branch, usually main).
+# Does not trigger on git tags, so it will not run in parallel with release.yml on tag push.
 
-name: Release
+name: Release (npm token)
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish:
@@ -42,4 +36,6 @@ jobs:
       - run: pnpm exec vp pack
 
       - name: Publish to npm
-        run: pnpm publish --access public --provenance --no-git-checks
+        run: pnpm publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
