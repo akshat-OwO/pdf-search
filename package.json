@@ -1,6 +1,6 @@
 {
   "name": "@akshatowo/pdf-search",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI for searching text in PDF files with page-numbered results.",
   "keywords": [
     "cli",
