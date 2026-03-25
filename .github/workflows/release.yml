@@ -2,9 +2,6 @@
 #
 # Preferred after the package exists: npm Trusted Publishing (OIDC) — link this repo +
 # this workflow on the package at npm → Access (no NPM_TOKEN).
-#
-# First publish / OIDC 404: use workflow "Release (npm token)" instead
-# (.github/workflows/release-npm-token.yml) with repository secret NPM_TOKEN.
 
 name: Release
 
@@ -30,16 +27,21 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify Node and npm for trusted publishing
+        run: |
+          node -v
+          npm -v
+
       - run: pnpm exec vp check
       - run: pnpm exec vp test
       - run: pnpm exec vp pack
 
       - name: Publish to npm
-        run: pnpm publish --access public --provenance --no-git-checks
+        run: npm publish --access public
