@@ -1,12 +1,12 @@
 import { parentPort, workerData } from "node:worker_threads";
 
-import { extractPageText, loadPdfDocument } from "./pdf.js";
+import { extractPageText, loadPdfDocumentFromSource, type PdfSource } from "./pdf.js";
 import { findPageMatches } from "./search-core.js";
 import type { PageSearchResult } from "./search.js";
 import type { SearchQuery } from "./search-core.js";
 
 interface WorkerInput {
-  pdfPath: string;
+  pdfSource: PdfSource;
   pages: number[];
   query: SearchQuery;
   contextChars: number;
@@ -30,7 +30,7 @@ interface WorkerErrorMessage {
 type WorkerMessage = WorkerProgressMessage | WorkerResultMessage | WorkerErrorMessage;
 
 async function run(payload: WorkerInput): Promise<PageSearchResult[]> {
-  const document = await loadPdfDocument(payload.pdfPath, { disableWorker: true });
+  const document = await loadPdfDocumentFromSource(payload.pdfSource, { disableWorker: true });
   const pageResults: PageSearchResult[] = [];
 
   try {

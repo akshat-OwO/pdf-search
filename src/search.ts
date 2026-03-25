@@ -23,7 +23,15 @@ import {
   normalizeQuery,
   resolveContextChars,
 } from "./search-core.js";
-import { extractPageText, loadPdfDocument } from "./pdf.js";
+import {
+  extractPageText,
+  fetchPdfFromUrl,
+  isRemotePdfUrl,
+  loadPdfDocumentFromSource,
+  normalizePdfFilesystemPath,
+  type PdfSource,
+  type RemoteFetchOptions,
+} from "./pdf.js";
 
 export interface SearchProgress {
   phase: "loading" | "scanning";
@@ -31,7 +39,12 @@ export interface SearchProgress {
   totalPages: number;
 }
 
-export interface SearchPdfOptions {
+export interface SearchPdfOptions extends RemoteFetchOptions {
+  /**
+   * For local PDFs (when worker threads are used), caps how many workers scan
+   * pages in parallel. For remote `http(s)` URLs the scan runs in-process, so
+   * this rarely changes wall-clock time meaningfully.
+   */
   concurrency?: number;
   contextChars?: number;
   onProgress?: (progress: SearchProgress) => void;
@@ -49,7 +62,15 @@ export async function searchPdf(
     totalPages: 0,
   });
 
-  const document = await loadPdfDocument(pdfPath, { disableWorker: true });
+  let pdfSource: PdfSource;
+  if (isRemotePdfUrl(pdfPath)) {
+    const data = await fetchPdfFromUrl(pdfPath, options);
+    pdfSource = { kind: "bytes", data };
+  } else {
+    pdfSource = { kind: "path", path: normalizePdfFilesystemPath(pdfPath) };
+  }
+
+  const document = await loadPdfDocumentFromSource(pdfSource, { disableWorker: true });
   const pageCount = document.numPages;
   await document.destroy();
   const pageNumbers = Array.from({ length: pageCount }, (_, index) => index + 1);
@@ -64,7 +85,7 @@ export async function searchPdf(
   });
 
   const pages = await searchPages({
-    pdfPath,
+    pdfSource,
     pageNumbers,
     query: normalizedQuery,
     contextChars,
@@ -107,7 +128,7 @@ function resolveConcurrency(requested: number | undefined, pageCount: number): n
 }
 
 interface SearchPagesInput {
-  pdfPath: string;
+  pdfSource: PdfSource;
   pageNumbers: number[];
   query: SearchQuery;
   contextChars: number;
@@ -115,12 +136,18 @@ interface SearchPagesInput {
   onPageProcessed: () => void;
 }
 
+function shouldSearchInProcessOnly(input: SearchPagesInput): boolean {
+  return (
+    !canUseBundledWorkerThreads() || input.concurrency <= 1 || input.pdfSource.kind === "bytes"
+  );
+}
+
 async function searchPages(input: SearchPagesInput): Promise<PageSearchResult[]> {
   if (input.pageNumbers.length === 0) {
     return [];
   }
 
-  if (!canUseBundledWorkerThreads() || input.concurrency <= 1) {
+  if (shouldSearchInProcessOnly(input)) {
     return searchPagesInProcess(input);
   }
 
@@ -129,7 +156,7 @@ async function searchPages(input: SearchPagesInput): Promise<PageSearchResult[]>
     chunks.map((pages) =>
       runSearchWorker(
         {
-          pdfPath: input.pdfPath,
+          pdfSource: input.pdfSource,
           pages,
           query: input.query,
           contextChars: input.contextChars,
@@ -143,7 +170,7 @@ async function searchPages(input: SearchPagesInput): Promise<PageSearchResult[]>
 }
 
 interface SearchWorkerInput {
-  pdfPath: string;
+  pdfSource: PdfSource;
   pages: number[];
   query: SearchQuery;
   contextChars: number;
@@ -234,7 +261,7 @@ async function runSearchWorker(
 }
 
 async function searchPagesInProcess(input: SearchPagesInput): Promise<PageSearchResult[]> {
-  const document = await loadPdfDocument(input.pdfPath, {
+  const document = await loadPdfDocumentFromSource(input.pdfSource, {
     disableWorker: true,
   });
 
@@ -272,7 +299,7 @@ function isSearchWorkerExecutionData(value: unknown): value is SearchWorkerExecu
 
 async function runSearchWorkerEntry(input: SearchWorkerExecutionData): Promise<void> {
   const pageResults = await searchPagesInProcess({
-    pdfPath: input.pdfPath,
+    pdfSource: input.pdfSource,
     pageNumbers: input.pages,
     query: input.query,
     contextChars: input.contextChars,

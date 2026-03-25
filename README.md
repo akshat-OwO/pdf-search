@@ -22,10 +22,12 @@ pnpm install
 ## Usage
 
 ```bash
-pdf-search <pdfPath> <query> [options]
-pdf-search <pdfPath> --and <term> [--and <term> ...] [--or <term> ...] [options]
-pdf-search --page <number> <pdfPath>
+pdf-search <pdfPathOrUrl> <query> [options]
+pdf-search <pdfPathOrUrl> --and <term> [--and <term> ...] [--or <term> ...] [options]
+pdf-search --page <number> <pdfPathOrUrl>
 ```
+
+`<pdfPathOrUrl>` may be a filesystem path, a `file://` URL, or an `http://` / `https://` URL to a PDF. Each CLI invocation that loads a remote URL downloads the file again (there is no cross-call cache). The programmatic API behaves the same: `loadPdfDocument` and `getPdfPageText` fetch on every call unless you pass local bytes or a path yourself.
 
 ### Options
 
@@ -35,12 +37,18 @@ pdf-search --page <number> <pdfPath>
 - `--or <term>`: require a page to contain at least one optional term; repeat as needed
 - `-c, --context`: show a short snippet around each match
 - `--context-chars <number>`: control how much surrounding text is shown
-- `--concurrency <number>`: control how many worker threads process pages in parallel
+- `--concurrency <number>`: for **local** PDFs (and the bundled CLI), how many **worker threads** share the scan—this is where you usually see a wall-clock speedup on multi-core machines. For **`http(s)` URLs**, the file is scanned **in the main process** (to avoid copying the whole download into every worker), so this flag has **little effect on runtime**; matches and ordering stay the same.
+- `--fetch-timeout-ms <n>`: for `http(s)` PDFs only, abort if the response is not received in time; default is 120000 when omitted. Use `0` to disable the timeout
+- `--max-fetch-bytes <n>`: for `http(s)` PDFs only, reject responses larger than _n_ bytes (checked while streaming)
 - `-h, --help`: print usage help
 
 Search terms are matched as case-insensitive substrings. Normal runs suppress
 recoverable PDF parser warnings, and progress is shown on stderr while the file
 is being scanned.
+
+### Security note
+
+If you pass URLs from untrusted users (for example inside a web application), fetching them can carry **SSRF** risk (internal addresses, redirect chains) and **resource** risk (very large downloads). Prefer allowlists, trusted hosts, or downloading out-of-band. Remote fetches use a default timeout; use `--max-fetch-bytes` (CLI) or `maxFetchBytes` (API) when you need an explicit body size limit.
 
 ## Examples
 
@@ -88,7 +96,10 @@ pdf-search --page 3 --page-format json "./docs/guide.pdf"
 ```
 
 `--concurrency` defaults to a bounded worker-thread count based on CPU cores, and
-is capped by the total page count to avoid oversubscription.
+is capped by the total page count to avoid oversubscription. That default matters
+most for **local** PDFs when the bundled CLI can use worker threads. For
+**remote** `http(s)` PDFs, scanning stays in-process, so changing `--concurrency`
+usually does not improve wall-clock time much.
 
 ## Example Output
 

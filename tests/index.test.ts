@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,6 +10,7 @@ import { expect, test } from "vite-plus/test";
 
 import { runCli } from "../src/index.ts";
 import { formatSearchResults } from "../src/index.ts";
+import { fetchPdfFromUrl } from "../src/index.ts";
 import { getPdfPageText } from "../src/index.ts";
 import { searchPdf } from "../src/index.ts";
 
@@ -222,6 +224,145 @@ test("searchPdf throws for unreadable paths", async () => {
   );
 });
 
+test("searchPdf loads remote http URL once and searches with concurrency", async () => {
+  const bytes = await buildPdfBytes([
+    "Needle appears once on page one.",
+    "This page does not contain the query.",
+    "A final needle appears twice: needle.",
+  ]);
+  const { baseUrl, close } = await servePdfBuffer(bytes);
+
+  try {
+    const result = await searchPdf(`${baseUrl}/doc.pdf`, "needle", {
+      concurrency: 2,
+    });
+
+    expect(result.pageCount).toBe(3);
+    expect(result.matchCount).toBe(3);
+    expect(result.filePath).toBe(`${baseUrl}/doc.pdf`);
+    expect(result.results.map((page) => page.page)).toEqual([1, 3]);
+  } finally {
+    await close();
+  }
+});
+
+test("getPdfPageText accepts remote http URL", async () => {
+  const bytes = await buildPdfBytes([
+    "Content unique to page one.",
+    "Second page has different words.",
+  ]);
+  const { baseUrl, close } = await servePdfBuffer(bytes);
+
+  try {
+    const page2 = await getPdfPageText(`${baseUrl}/doc.pdf`, 2);
+    expect(page2).toContain("Second page");
+    expect(page2).not.toContain("page one");
+  } finally {
+    await close();
+  }
+});
+
+test("searchPdf throws when remote URL returns non-OK status", async () => {
+  const { baseUrl, close } = await servePdfBuffer(Buffer.alloc(0), { statusCode: 404 });
+
+  try {
+    await expect(searchPdf(`${baseUrl}/missing.pdf`, "x")).rejects.toThrow(
+      "Failed to fetch PDF from URL: HTTP 404",
+    );
+  } finally {
+    await close();
+  }
+});
+
+test("searchPdf accepts file:// URL", async () => {
+  const fixture = await createPdfFixture(["file protocol needle here"]);
+
+  try {
+    const url = pathToFileURL(fixture.pdfPath).href;
+    const result = await searchPdf(url, "needle");
+    expect(result.matchCount).toBe(1);
+    expect(result.results.map((page) => page.page)).toEqual([1]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("getPdfPageText accepts file:// URL", async () => {
+  const fixture = await createPdfFixture(["Page one only"]);
+
+  try {
+    const url = pathToFileURL(fixture.pdfPath).href;
+    const text = await getPdfPageText(url, 1);
+    expect(text).toContain("Page one");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("searchPdf throws when remote URL returns HTTP 200 with non-PDF body", async () => {
+  const bytes = new TextEncoder().encode("this is not a pdf file");
+  const { baseUrl, close } = await servePdfBuffer(bytes);
+
+  try {
+    await expect(searchPdf(`${baseUrl}/fake.pdf`, "needle")).rejects.toThrow(
+      "Failed to read PDF file",
+    );
+  } finally {
+    await close();
+  }
+});
+
+test("fetchPdfFromUrl respects maxFetchBytes", async () => {
+  const bytes = await buildPdfBytes(["short"]);
+  const { baseUrl, close } = await servePdfBuffer(bytes);
+
+  try {
+    await expect(fetchPdfFromUrl(`${baseUrl}/doc.pdf`, { maxFetchBytes: 16 })).rejects.toThrow(
+      "exceeds maxFetchBytes (16)",
+    );
+  } finally {
+    await close();
+  }
+});
+
+test("fetchPdfFromUrl times out when the server never responds", async () => {
+  const { baseUrl, close } = await serveStallForever();
+
+  try {
+    await expect(fetchPdfFromUrl(`${baseUrl}/slow.pdf`, { fetchTimeoutMs: 80 })).rejects.toThrow(
+      "request timed out",
+    );
+  } finally {
+    await close();
+  }
+});
+
+test("searchPdf remote URL works with PDF_SEARCH_FORCE_WORKERS", async () => {
+  const previousWorkers = process.env.PDF_SEARCH_FORCE_WORKERS;
+  process.env.PDF_SEARCH_FORCE_WORKERS = "1";
+
+  const bytes = await buildPdfBytes([
+    "Needle on remote with workers env.",
+    "Second page no match.",
+  ]);
+  const { baseUrl, close } = await servePdfBuffer(bytes);
+
+  try {
+    const result = await searchPdf(`${baseUrl}/doc.pdf`, "needle", {
+      concurrency: 2,
+    });
+    expect(result.matchCount).toBe(1);
+    expect(result.results.map((page) => page.page)).toEqual([1]);
+  } finally {
+    await close();
+    if (previousWorkers === undefined) {
+      delete process.env.PDF_SEARCH_FORCE_WORKERS;
+    } else {
+      process.env.PDF_SEARCH_FORCE_WORKERS = previousWorkers;
+    }
+  }
+});
+
 test("getPdfPageText returns text for the requested page only", async () => {
   const fixture = await createPdfFixture([
     "Content unique to page one.",
@@ -396,7 +537,7 @@ test("runCli rejects --page combined with search query", async () => {
   const exitCode = await runCli(["/tmp/x.pdf", "query", "--page", "1"], captured.io);
 
   expect(exitCode).toBe(1);
-  expect(captured.stderr).toContain("With --page, provide only <pdfPath>.");
+  expect(captured.stderr).toContain("With --page, provide only <pdfPathOrUrl>.");
 });
 
 test("runCli rejects missing search terms", async () => {
@@ -423,6 +564,18 @@ async function createPdfFixture(pageTexts: string[]): Promise<{
 }> {
   const directory = await mkdtemp(join(tmpdir(), "pdf-search-"));
   const pdfPath = join(directory, "fixture.pdf");
+  const bytes = await buildPdfBytes(pageTexts);
+  await writeFile(pdfPath, bytes);
+
+  return {
+    pdfPath,
+    cleanup: async () => {
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
+}
+
+async function buildPdfBytes(pageTexts: string[]): Promise<Uint8Array> {
   const pdfDocument = await PDFDocument.create();
   const font = await pdfDocument.embedFont(StandardFonts.Helvetica);
 
@@ -437,14 +590,77 @@ async function createPdfFixture(pageTexts: string[]): Promise<{
     });
   }
 
-  await writeFile(pdfPath, await pdfDocument.save());
+  return new Uint8Array(await pdfDocument.save());
+}
 
-  return {
-    pdfPath,
-    cleanup: async () => {
-      await rm(directory, { recursive: true, force: true });
-    },
-  };
+function serveStallForever(): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+  return new Promise((resolve, reject) => {
+    const server = createServer((_request, _response) => {
+      /* never write a response — client should hit fetch timeout */
+    });
+
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("Expected numeric listen address."));
+        return;
+      }
+
+      resolve({
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        close: () =>
+          new Promise<void>((closeResolve, closeReject) => {
+            server.closeAllConnections?.();
+            server.close((error) => {
+              if (error) {
+                closeReject(error);
+              } else {
+                closeResolve();
+              }
+            });
+          }),
+      });
+    });
+  });
+}
+
+function servePdfBuffer(
+  bytes: Uint8Array,
+  options: { statusCode?: number } = {},
+): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+  return new Promise((resolve, reject) => {
+    const server = createServer((request, response) => {
+      const statusCode = options.statusCode ?? 200;
+      response.writeHead(statusCode, { "Content-Type": "application/pdf" });
+      response.end(Buffer.from(bytes));
+    });
+
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("Expected numeric listen address."));
+        return;
+      }
+
+      resolve({
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        close: () =>
+          new Promise<void>((closeResolve, closeReject) => {
+            server.close((error) => {
+              if (error) {
+                closeReject(error);
+              } else {
+                closeResolve();
+              }
+            });
+          }),
+      });
+    });
+  });
 }
 
 function createCapturedIo(): {

@@ -16,10 +16,20 @@ export type {
   PageTextFormat,
   PdfDocumentProxy,
   PdfPageProxy,
+  PdfSource,
   PdfTextContent,
   PdfTextItem,
+  RemoteFetchOptions,
 } from "./pdf.js";
-export { extractPageText, getPdfPageText, loadPdfDocument } from "./pdf.js";
+export {
+  extractPageText,
+  fetchPdfFromUrl,
+  getPdfPageText,
+  isRemotePdfUrl,
+  loadPdfDocument,
+  loadPdfDocumentFromSource,
+  normalizePdfFilesystemPath,
+} from "./pdf.js";
 export type {
   PageSearchResult,
   SearchMatch,
